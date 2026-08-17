@@ -5,11 +5,12 @@ require_once __DIR__ . '/../helpers/security.php';
 require_once __DIR__ . '/../models/User.php';
 require_once __DIR__ . '/../middleware/AuthMiddleware.php';
 require_once __DIR__ . '/../controllers/AuthController.php';
+require_once __DIR__ . '/../controllers/OnboardingController.php';
 
 // Allow CORS
 header("Access-Control-Allow-Origin: *");
-header("Access-Control-Allow-Methods: GET, POST, OPTIONS");
-header("Access-Control-Allow-Headers: Content-Type, Authorization");
+header("Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS");
+header("Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With");
 
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     http_response_code(200);
@@ -17,24 +18,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
 }
 
 $uri = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
+$method = $_SERVER['REQUEST_METHOD'];
 
 $authController = new Controllers\AuthController();
+$onboardingController = new Controllers\OnboardingController();
 
-if ($uri === '/api/auth/register' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+// Auth Routes
+if ($uri === '/api/auth/register' && $method === 'POST') {
     $authController->register();
-} elseif ($uri === '/api/auth/login' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+} elseif ($uri === '/api/auth/login' && $method === 'POST') {
     $authController->login();
-} elseif ($uri === '/api/auth/me' && $_SERVER['REQUEST_METHOD'] === 'GET') {
+} elseif ($uri === '/api/auth/me' && $method === 'GET') {
     $authController->me();
+
+// Onboarding Routes
+} elseif ($uri === '/api/onboarding/options' && $method === 'GET') {
+    $onboardingController->getOptions();
+} elseif ($uri === '/api/onboarding/complete' && $method === 'POST') {
+    $onboardingController->complete();
+
+// Fallback 404
 } else {
     Helpers\Response::error('Endpoint not found', [], 404);
 }
-
-$onboardingController = new Controllers\OnboardingController();
-
-if ($uri === '/api/onboarding/options' && $_SERVER['REQUEST_METHOD'] === 'GET') {
-    $onboardingController->getOptions();
-} elseif ($uri === '/api/onboarding/complete' && $_SERVER['REQUEST_METHOD'] === 'POST') {
-    $onboardingController->complete();
-}
-

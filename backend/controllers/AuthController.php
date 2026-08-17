@@ -51,7 +51,6 @@ class AuthController {
         $stmt = $this->db->prepare("
             INSERT INTO users (first_name, email, phone, password_hash, onboarding_completed)
             VALUES (:first_name, :email, :phone, :password_hash, FALSE)
-            RETURNING id, first_name, email, phone, onboarding_completed, created_at
         ");
 
         $stmt->execute([
@@ -61,10 +60,15 @@ class AuthController {
             'password_hash' => $passwordHash
         ]);
 
+        $userId = $this->db->lastInsertId();
+
+        // Fetch user record for response
+        $stmt = $this->db->prepare("SELECT id, first_name, email, phone, onboarding_completed, created_at FROM users WHERE id = :id");
+        $stmt->execute(['id' => $userId]);
         $user = $stmt->fetch(PDO::FETCH_ASSOC);
 
         // Generate JWT Token
-        $token = $this->generateJWT($user['id'], $user['email']);
+        $token = $this->generateJWT((string)$user['id'], $user['email']);
 
         Response::success([
             'token' => $token,
@@ -94,7 +98,7 @@ class AuthController {
         unset($user['password_hash']);
 
         // Generate JWT Token
-        $token = $this->generateJWT($user['id'], $user['email']);
+        $token = $this->generateJWT((string)$user['id'], $user['email']);
 
         Response::success([
             'token' => $token,
