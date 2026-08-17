@@ -3,23 +3,23 @@ namespace Helpers;
 
 class Response {
     public static function json($data, int $statusCode = 200): void {
+        header("Content-Type: application/json; charset=UTF-8");
         http_response_code($statusCode);
-        header('Content-Type: application/json');
         echo json_encode($data);
         exit;
     }
 
-    public static function success($data = [], string $message = 'Operation successful', int $statusCode = 200): void {
+    public static function success($data = [], string $message = "Success", int $statusCode = 200): void {
         self::json([
-            'success' => true,
+            'status' => 'success',
             'message' => $message,
             'data' => $data
         ], $statusCode);
     }
 
-    public static function error(string $message = 'Error occurred', $errors = [], int $statusCode = 400): void {
+    public static function error(string $message = "Error", array $errors = [], int $statusCode = 400): void {
         self::json([
-            'success' => false,
+            'status' => 'error',
             'message' => $message,
             'errors' => $errors
         ], $statusCode);

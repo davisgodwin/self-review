@@ -1,43 +1,70 @@
 <?php
 namespace Controllers;
 
-use Models\User;
+use Config\Database;
 use Helpers\Response;
-use Helpers\Security;
 use Middleware\AuthMiddleware;
+use Firebase\JWT\JWT;
+use PDO;
 
 class AuthController {
-    private User $userModel;
+    private PDO $db;
+    private string $jwtSecret;
 
     public function __construct() {
-        $this->userModel = new User();
+        $this->db = Database::getConnection();
+        $this->jwtSecret = $_ENV['JWT_SECRET'] ?? 'default_fallback_secret_key';
     }
 
+    // POST /api/auth/register
     public function register(): void {
         $data = json_decode(file_get_contents('php://input'), true) ?? [];
 
-        $errors = [];
-        if (empty($data['first_name'])) $errors['first_name'] = 'First name is required';
-        if (empty($data['email']) || !filter_var($data['email'], FILTER_VALIDATE_EMAIL)) $errors['email'] = 'Valid email is required';
-        if (empty($data['phone'])) $errors['phone'] = 'Phone number is required';
-        if (empty($data['password']) || strlen($data['password']) < 8) $errors['password'] = 'Password must be at least 8 characters';
-        if (($data['password'] ?? '') !== ($data['confirm_password'] ?? '')) $errors['confirm_password'] = 'Passwords do not match';
-        if (empty($data['terms'])) $errors['terms'] = 'You must accept the Terms & Privacy';
+        $firstName = trim($data['first_name'] ?? '');
+        $email = strtolower(trim($data['email'] ?? ''));
+        $phone = trim($data['phone'] ?? '');
+        $password = $data['password'] ?? '';
 
-        if (!empty($errors)) {
-            Response::error('Validation failed', $errors, 422);
+        // Validation
+        if (empty($firstName) || empty($email) || empty($phone) || empty($password)) {
+            Response::error('All fields (first_name, email, phone, password) are required.', [], 422);
         }
 
-        if ($this->userModel->findByEmailOrPhone($data['email'])) {
-            Response::error('Email is already registered', ['email' => 'Email taken'], 409);
-        }
-        if ($this->userModel->findByEmailOrPhone($data['phone'])) {
-            Response::error('Phone number is already registered', ['phone' => 'Phone number taken'], 409);
+        if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            Response::error('Invalid email address format.', [], 422);
         }
 
-        $hash = Security::hashPassword($data['password']);
-        $user = $this->userModel->create($data['first_name'], $data['email'], $data['phone'], $hash);
-        $token = Security::generateJWT(['user_id' => $user['id']]);
+        if (strlen($password) < 6) {
+            Response::error('Password must be at least 6 characters long.', [], 422);
+        }
+
+        // Check duplicate email/phone
+        $stmt = $this->db->prepare("SELECT id FROM users WHERE email = :email OR phone = :phone LIMIT 1");
+        $stmt->execute(['email' => $email, 'phone' => $phone]);
+        if ($stmt->fetch()) {
+            Response::error('An account with this email or phone number already exists.', [], 409);
+        }
+
+        // Hash Password & Insert User
+        $passwordHash = password_hash($password, PASSWORD_BCRYPT);
+
+        $stmt = $this->db->prepare("
+            INSERT INTO users (first_name, email, phone, password_hash, onboarding_completed)
+            VALUES (:first_name, :email, :phone, :password_hash, FALSE)
+            RETURNING id, first_name, email, phone, onboarding_completed, created_at
+        ");
+
+        $stmt->execute([
+            'first_name' => $firstName,
+            'email' => $email,
+            'phone' => $phone,
+            'password_hash' => $passwordHash
+        ]);
+
+        $user = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        // Generate JWT Token
+        $token = $this->generateJWT($user['id'], $user['email']);
 
         Response::success([
             'token' => $token,
@@ -45,24 +72,29 @@ class AuthController {
         ], 'Registration successful', 201);
     }
 
+    // POST /api/auth/login
     public function login(): void {
         $data = json_decode(file_get_contents('php://input'), true) ?? [];
 
-        $identifier = trim($data['identifier'] ?? '');
+        $email = strtolower(trim($data['email'] ?? ''));
         $password = $data['password'] ?? '';
 
-        if (empty($identifier) || empty($password)) {
-            Response::error('Email/Phone and password are required', [], 422);
+        if (empty($email) || empty($password)) {
+            Response::error('Email and password are required.', [], 422);
         }
 
-        $user = $this->userModel->findByEmailOrPhone($identifier);
+        $stmt = $this->db->prepare("SELECT * FROM users WHERE email = :email LIMIT 1");
+        $stmt->execute(['email' => $email]);
+        $user = $stmt->fetch(PDO::FETCH_ASSOC);
 
-        if (!$user || !Security::verifyPassword($password, $user['password_hash'])) {
-            Response::error('Invalid credentials', [], 401);
+        if (!$user || !password_verify($password, $user['password_hash'])) {
+            Response::error('Invalid email or password.', [], 401);
         }
 
-        $token = Security::generateJWT(['user_id' => $user['id']]);
         unset($user['password_hash']);
+
+        // Generate JWT Token
+        $token = $this->generateJWT($user['id'], $user['email']);
 
         Response::success([
             'token' => $token,
@@ -70,14 +102,35 @@ class AuthController {
         ], 'Login successful');
     }
 
+    // GET /api/auth/me
     public function me(): void {
-        $authUser = AuthMiddleware::authenticate();
-        $user = $this->userModel->findById($authUser['user_id']);
+        $userData = AuthMiddleware::authenticate();
+        $userId = $userData['user_id'];
+
+        $stmt = $this->db->prepare("SELECT id, first_name, email, phone, onboarding_completed, created_at FROM users WHERE id = :id");
+        $stmt->execute(['id' => $userId]);
+        $user = $stmt->fetch(PDO::FETCH_ASSOC);
 
         if (!$user) {
-            Response::error('User not found', [], 404);
+            Response::error('User not found.', [], 404);
         }
 
         Response::success(['user' => $user]);
+    }
+
+    private function generateJWT(string $userId, string $email): string {
+        $issuedAt = time();
+        $expirationTime = $issuedAt + (60 * 60 * 24 * 7); // 7 days token validity
+
+        $payload = [
+            'iat' => $issuedAt,
+            'exp' => $expirationTime,
+            'data' => [
+                'user_id' => $userId,
+                'email' => $email
+            ]
+        ];
+
+        return JWT::encode($payload, $this->jwtSecret, 'HS256');
     }
 }

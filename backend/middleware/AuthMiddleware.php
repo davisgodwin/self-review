@@ -2,24 +2,27 @@
 namespace Middleware;
 
 use Helpers\Response;
-use Helpers\Security;
+use Firebase\JWT\JWT;
+use Firebase\JWT\Key;
+use Exception;
 
 class AuthMiddleware {
     public static function authenticate(): array {
         $headers = getallheaders();
         $authHeader = $headers['Authorization'] ?? $headers['authorization'] ?? '';
 
-        if (!preg_match('/Bearer\s(\S+)/', $authHeader, $matches)) {
-            Response::error('Unauthorized - Missing or invalid token format', [], 401);
+        if (!$authHeader || !preg_match('/Bearer\s(\S+)/', $authHeader, $matches)) {
+            Response::error('Unauthorized access. Token missing.', [], 401);
         }
 
-        $token = $matches[1];
-        $decoded = Security::decodeJWT($token);
+        $jwt = $matches[1];
+        $jwtSecret = $_ENV['JWT_SECRET'] ?? 'default_fallback_secret_key';
 
-        if (!$decoded || !isset($decoded['user_id'])) {
-            Response::error('Unauthorized - Invalid or expired token', [], 401);
+        try {
+            $decoded = JWT::decode($jwt, new Key($jwtSecret, 'HS256'));
+            return (array) $decoded->data;
+        } catch (Exception $e) {
+            Response::error('Invalid or expired token.', [], 401);
         }
-
-        return $decoded;
     }
 }

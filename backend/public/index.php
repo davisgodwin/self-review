@@ -29,3 +29,12 @@ if ($uri === '/api/auth/register' && $_SERVER['REQUEST_METHOD'] === 'POST') {
 } else {
     Helpers\Response::error('Endpoint not found', [], 404);
 }
+
+$onboardingController = new Controllers\OnboardingController();
+
+if ($uri === '/api/onboarding/options' && $_SERVER['REQUEST_METHOD'] === 'GET') {
+    $onboardingController->getOptions();
+} elseif ($uri === '/api/onboarding/complete' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    $onboardingController->complete();
+}
+
