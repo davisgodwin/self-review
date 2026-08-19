@@ -1,7 +1,7 @@
 <?php
 require_once __DIR__ . '/../config/database.php';
-require_once __DIR__ . '/../helpers/response.php';
-require_once __DIR__ . '/../helpers/security.php';
+require_once __DIR__ . '/../helpers/Response.php'; // Capital R
+require_once __DIR__ . '/../helpers/Security.php'; // Capital S
 require_once __DIR__ . '/../models/User.php';
 require_once __DIR__ . '/../middleware/AuthMiddleware.php';
 require_once __DIR__ . '/../controllers/AuthController.php';
@@ -37,7 +37,6 @@ if ($uri === '/api/auth/register' && $method === 'POST') {
 } elseif ($uri === '/api/onboarding/complete' && $method === 'POST') {
     $onboardingController->complete();
 
-// Fallback 404
 } else {
     Helpers\Response::error('Endpoint not found', [], 404);
 }

@@ -28,7 +28,14 @@ export default function RegisterPage() {
       await register(formData);
       navigate('/onboarding');
     } catch (err) {
-      setError(err.response?.data?.message || 'Registration failed. Please try again.');
+      // Extracts explicit error message returned by PHP backend
+      const errorMessage =
+        err.response?.data?.message ||
+        err.response?.data?.error ||
+        err.message ||
+        'Registration failed. Please check your details and try again.';
+
+      setError(errorMessage);
     } finally {
       setLoading(false);
     }
@@ -101,7 +108,7 @@ export default function RegisterPage() {
         <button
           type="submit"
           disabled={loading}
-          className="w-full py-3 mt-2 bg-royalBlue hover:bg-blue-600 text-white font-semibold rounded-xl transition duration-200"
+          className="w-full py-3 mt-2 bg-royalBlue hover:bg-blue-600 text-white font-semibold rounded-xl transition duration-200 disabled:opacity-50"
         >
           {loading ? 'Creating Account...' : 'Register'}
         </button>
