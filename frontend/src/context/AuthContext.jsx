@@ -38,9 +38,10 @@ export function AuthProvider({ children }) {
 
   const login = async (email, password) => {
     const response = await axios.post(`${API_BASE}/auth/login`, { email, password });
-    const payload = response.data?.data || response.data || {};
-    const newToken = payload.token;
-    const userData = payload.user;
+    
+    // Safely extract the token and user whether they are flat or deeply nested inside response.data.data
+    const newToken = response.data?.data?.token || response.data?.token;
+    const userData = response.data?.data?.user || response.data?.user;
 
     if (!newToken) {
       throw new Error(response.data?.message || 'Login failed: No token returned from server.');
@@ -55,9 +56,10 @@ export function AuthProvider({ children }) {
 
   const register = async (formData) => {
     const response = await axios.post(`${API_BASE}/auth/register`, formData);
-    const payload = response.data?.data || response.data || {};
-    const newToken = payload.token;
-    const userData = payload.user;
+    
+    // Safely extract the token and user whether they are flat or deeply nested inside response.data.data
+    const newToken = response.data?.data?.token || response.data?.token;
+    const userData = response.data?.data?.user || response.data?.user;
 
     if (!newToken) {
       throw new Error(response.data?.message || 'Registration completed, but no authentication token was received.');
