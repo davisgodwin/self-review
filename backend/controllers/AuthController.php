@@ -14,6 +14,9 @@ class AuthController {
 
     public function __construct() {
         $this->db = Database::getConnection();
+        // Ensure PDO throws exceptions for silent SQL failures
+        $this->db->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+        
         $this->jwtSecret = $_ENV['JWT_SECRET'] ?? 'default_fallback_secret_key';
     }
 
@@ -27,7 +30,6 @@ class AuthController {
             $phone = trim($data['phone'] ?? '');
             $password = $data['password'] ?? '';
 
-            // Validation
             if (empty($firstName) || empty($email) || empty($phone) || empty($password)) {
                 Response::error('All fields (first_name, email, phone, password) are required.', [], 422);
             }
@@ -40,14 +42,13 @@ class AuthController {
                 Response::error('Password must be at least 6 characters long.', [], 422);
             }
 
-            // Check duplicate email/phone
+            // Check duplicate email or phone
             $stmt = $this->db->prepare("SELECT id FROM users WHERE email = :email OR phone = :phone LIMIT 1");
             $stmt->execute(['email' => $email, 'phone' => $phone]);
             if ($stmt->fetch()) {
                 Response::error('An account with this email or phone number already exists.', [], 409);
             }
 
-            // Hash Password & Insert User
             $passwordHash = password_hash($password, PASSWORD_BCRYPT);
 
             $stmt = $this->db->prepare("
@@ -62,7 +63,7 @@ class AuthController {
                 'password_hash' => $passwordHash
             ]);
 
-            // Query by email directly for universal driver compatibility (MySQL & PostgreSQL)
+            // Query by email directly to guarantee driver compatibility (MySQL & PostgreSQL)
             $stmt = $this->db->prepare("
                 SELECT id, first_name, email, phone, onboarding_completed, created_at 
                 FROM users 
@@ -72,12 +73,16 @@ class AuthController {
             $stmt->execute(['email' => $email]);
             $user = $stmt->fetch(PDO::FETCH_ASSOC);
 
-            if (!$user) {
-                Response::error('User registration failed during record retrieval.', [], 500);
+            if (!$user || !isset($user['id'])) {
+                Response::error('User registration failed: Record could not be retrieved from database.', [], 500);
             }
 
             // Generate JWT Token
-            $token = $this->generateJWT((string)$user['id'], $user['email']);
+            $token = $this->generateJWT((string)$user['id'], (string)$user['email']);
+
+            if (!$token) {
+                Response::error('Token generation failed.', [], 500);
+            }
 
             Response::success([
                 'token' => $token,
@@ -85,7 +90,7 @@ class AuthController {
             ], 'Registration successful', 201);
 
         } catch (Exception $e) {
-            Response::error('Database Error: ' . $e->getMessage(), [], 500);
+            Response::error('Server Error: ' . $e->getMessage(), [], 500);
         }
     }
 
@@ -111,8 +116,7 @@ class AuthController {
 
             unset($user['password_hash']);
 
-            // Generate JWT Token
-            $token = $this->generateJWT((string)$user['id'], $user['email']);
+            $token = $this->generateJWT((string)$user['id'], (string)$user['email']);
 
             Response::success([
                 'token' => $token,
@@ -120,7 +124,7 @@ class AuthController {
             ], 'Login successful');
 
         } catch (Exception $e) {
-            Response::error('Database Error: ' . $e->getMessage(), [], 500);
+            Response::error('Server Error: ' . $e->getMessage(), [], 500);
         }
     }
 
