@@ -5,6 +5,7 @@ use Config\Database;
 use Helpers\Response;
 use Middleware\AuthMiddleware;
 use Firebase\JWT\JWT;
+use Firebase\JWT\Key;
 use PDO;
 use Exception;
 
@@ -14,7 +15,6 @@ class AuthController {
 
     public function __construct() {
         $this->db = Database::getConnection();
-        // Ensure PDO throws exceptions for silent SQL failures
         $this->db->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
         
         $this->jwtSecret = $_ENV['JWT_SECRET'] ?? 'default_fallback_secret_key';
@@ -63,7 +63,7 @@ class AuthController {
                 'password_hash' => $passwordHash
             ]);
 
-            // Query by email directly to guarantee driver compatibility (MySQL & PostgreSQL)
+            // Fetch created user
             $stmt = $this->db->prepare("
                 SELECT id, first_name, email, phone, onboarding_completed, created_at 
                 FROM users 
@@ -74,15 +74,11 @@ class AuthController {
             $user = $stmt->fetch(PDO::FETCH_ASSOC);
 
             if (!$user || !isset($user['id'])) {
-                Response::error('User registration failed: Record could not be retrieved from database.', [], 500);
+                Response::error('User registration failed: User record could not be retrieved.', [], 500);
             }
 
-            // Generate JWT Token
+            // Safely generate token
             $token = $this->generateJWT((string)$user['id'], (string)$user['email']);
-
-            if (!$token) {
-                Response::error('Token generation failed.', [], 500);
-            }
 
             Response::success([
                 'token' => $token,
@@ -90,78 +86,41 @@ class AuthController {
             ], 'Registration successful', 201);
 
         } catch (Exception $e) {
-            Response::error('Server Error: ' . $e->getMessage(), [], 500);
-        }
-    }
-
-    // POST /api/auth/login
-    public function login(): void {
-        try {
-            $data = json_decode(file_get_contents('php://input'), true) ?? [];
-
-            $email = strtolower(trim($data['email'] ?? ''));
-            $password = $data['password'] ?? '';
-
-            if (empty($email) || empty($password)) {
-                Response::error('Email and password are required.', [], 422);
-            }
-
-            $stmt = $this->db->prepare("SELECT * FROM users WHERE email = :email LIMIT 1");
-            $stmt->execute(['email' => $email]);
-            $user = $stmt->fetch(PDO::FETCH_ASSOC);
-
-            if (!$user || !password_verify($password, $user['password_hash'])) {
-                Response::error('Invalid email or password.', [], 401);
-            }
-
-            unset($user['password_hash']);
-
-            $token = $this->generateJWT((string)$user['id'], (string)$user['email']);
-
-            Response::success([
-                'token' => $token,
-                'user' => $user
-            ], 'Login successful');
-
-        } catch (Exception $e) {
-            Response::error('Server Error: ' . $e->getMessage(), [], 500);
-        }
-    }
-
-    // GET /api/auth/me
-    public function me(): void {
-        try {
-            $userData = AuthMiddleware::authenticate();
-            $userId = $userData['user_id'];
-
-            $stmt = $this->db->prepare("SELECT id, first_name, email, phone, onboarding_completed, created_at FROM users WHERE id = :id");
-            $stmt->execute(['id' => $userId]);
-            $user = $stmt->fetch(PDO::FETCH_ASSOC);
-
-            if (!$user) {
-                Response::error('User not found.', [], 404);
-            }
-
-            Response::success(['user' => $user]);
-
-        } catch (Exception $e) {
-            Response::error('Server Error: ' . $e->getMessage(), [], 500);
+            Response::error('Registration Error: ' . $e->getMessage(), [], 500);
         }
     }
 
     private function generateJWT(string $userId, string $email): string {
-        $issuedAt = time();
-        $expirationTime = $issuedAt + (60 * 60 * 24 * 7); // 7 days token validity
+        try {
+            $issuedAt = time();
+            $expirationTime = $issuedAt + (60 * 60 * 24 * 7); // 7 days token validity
 
-        $payload = [
-            'iat' => $issuedAt,
-            'exp' => $expirationTime,
-            'data' => [
-                'user_id' => $userId,
-                'email' => $email
-            ]
-        ];
+            $payload = [
+                'iat' => $issuedAt,
+                'exp' => $expirationTime,
+                'data' => [
+                    'user_id' => $userId,
+                    'email' => $email
+                ]
+            ];
 
-        return JWT::encode($payload, $this->jwtSecret, 'HS256');
+            return JWT::encode($payload, $this->jwtSecret, 'HS256');
+        } catch (Exception $e) {
+            // Fallback for native HMAC token in case firebase/php-jwt library throws driver exception
+            $header = json_encode(['typ' => 'JWT', 'alg' => 'HS256']);
+            $base64UrlHeader = str_replace(['+', '/', '='], ['-', '_', ''], base64_encode($header));
+            
+            $payloadData = json_encode([
+                'iat' => time(),
+                'exp' => time() + (60 * 60 * 24 * 7),
+                'data' => ['user_id' => $userId, 'email' => $email]
+            ]);
+            $base64UrlPayload = str_replace(['+', '/', '='], ['-', '_', ''], base64_encode($payloadData));
+
+            $signature = hash_hmac('sha256', $base64UrlHeader . "." . $base64UrlPayload, $this->jwtSecret, true);
+            $base64UrlSignature = str_replace(['+', '/', '='], ['-', '_', ''], base64_encode($signature));
+
+            return $base64UrlHeader . "." . $base64UrlPayload . "." . $base64UrlSignature;
+        }
     }
 }
