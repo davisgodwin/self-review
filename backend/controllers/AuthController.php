@@ -22,6 +22,9 @@ class AuthController {
 
     // POST /api/auth/register
     public function register(): void {
+        // Start output buffering to catch any stray PHP warnings, notices, or whitespace
+        ob_start();
+
         try {
             $data = json_decode(file_get_contents('php://input'), true) ?? [];
 
@@ -31,22 +34,30 @@ class AuthController {
             $password = $data['password'] ?? '';
 
             if (empty($firstName) || empty($email) || empty($phone) || empty($password)) {
+                ob_clean();
                 Response::error('All fields (first_name, email, phone, password) are required.', [], 422);
+                return;
             }
 
             if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+                ob_clean();
                 Response::error('Invalid email address format.', [], 422);
+                return;
             }
 
             if (strlen($password) < 6) {
+                ob_clean();
                 Response::error('Password must be at least 6 characters long.', [], 422);
+                return;
             }
 
             // Check duplicate email or phone
             $stmt = $this->db->prepare("SELECT id FROM users WHERE email = :email OR phone = :phone LIMIT 1");
             $stmt->execute(['email' => $email, 'phone' => $phone]);
             if ($stmt->fetch()) {
+                ob_clean();
                 Response::error('An account with this email or phone number already exists.', [], 409);
+                return;
             }
 
             $passwordHash = password_hash($password, PASSWORD_BCRYPT);
@@ -74,11 +85,21 @@ class AuthController {
             $user = $stmt->fetch(PDO::FETCH_ASSOC);
 
             if (!$user || !isset($user['id'])) {
+                ob_clean();
                 Response::error('User registration failed: User record could not be retrieved.', [], 500);
+                return;
             }
 
             // Safely generate token
             $token = $this->generateJWT((string)$user['id'], (string)$user['email']);
+
+            // Clear any stray characters or warnings before sending JSON response
+            if (ob_get_length()) {
+                ob_clean();
+            }
+
+            // Ensure JSON headers are strictly declared
+            header('Content-Type: application/json; charset=utf-8');
 
             Response::success([
                 'token' => $token,
@@ -86,6 +107,9 @@ class AuthController {
             ], 'Registration successful', 201);
 
         } catch (Exception $e) {
+            if (ob_get_length()) {
+                ob_clean();
+            }
             Response::error('Registration Error: ' . $e->getMessage(), [], 500);
         }
     }
@@ -117,6 +141,7 @@ class AuthController {
             ]);
             $base64UrlPayload = str_replace(['+', '/', '='], ['-', '_', ''], base64_encode($payloadData));
 
+            // Setting binary output to true to safely hash before Base64Url conversion
             $signature = hash_hmac('sha256', $base64UrlHeader . "." . $base64UrlPayload, $this->jwtSecret, true);
             $base64UrlSignature = str_replace(['+', '/', '='], ['-', '_', ''], base64_encode($signature));
 
