@@ -25,7 +25,8 @@ export function AuthProvider({ children }) {
       }
       try {
         const response = await axios.get(`${API_BASE}/auth/me`);
-        setUser(response.data.data.user);
+        const userData = response.data?.data?.user || response.data?.user;
+        setUser(userData);
       } catch (err) {
         console.error('Session expired or invalid token:', err);
         logout();
@@ -39,8 +40,16 @@ export function AuthProvider({ children }) {
 
   const login = async (email, password) => {
     const response = await axios.post(`${API_BASE}/auth/login`, { email, password });
-    const { token: newToken, user: userData } = response.data.data;
     
+    // Safely extract token and user across response structures
+    const payload = response.data?.data || response.data || {};
+    const newToken = payload.token;
+    const userData = payload.user;
+
+    if (!newToken) {
+      throw new Error(response.data?.message || 'Login failed: No authentication token received.');
+    }
+
     localStorage.setItem('token', newToken);
     axios.defaults.headers.common['Authorization'] = `Bearer ${newToken}`;
     setToken(newToken);
@@ -50,7 +59,15 @@ export function AuthProvider({ children }) {
 
   const register = async (formData) => {
     const response = await axios.post(`${API_BASE}/auth/register`, formData);
-    const { token: newToken, user: userData } = response.data.data;
+    
+    // Safely extract token and user across response structures
+    const payload = response.data?.data || response.data || {};
+    const newToken = payload.token;
+    const userData = payload.user;
+
+    if (!newToken) {
+      throw new Error(response.data?.message || 'Registration failed: No authentication token received.');
+    }
 
     localStorage.setItem('token', newToken);
     axios.defaults.headers.common['Authorization'] = `Bearer ${newToken}`;
